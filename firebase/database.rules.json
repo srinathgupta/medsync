@@ -2,30 +2,59 @@
   "rules": {
     ".read": false,
     ".write": false,
+    "access": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid"
+      }
+    },
     "device": {
-      ".read": "auth != null",
-      ".write": "auth != null",
+      ".read": "auth != null && root.child('access').child(auth.uid).val() === true",
+      ".write": "auth != null && root.child('access').child(auth.uid).val() === true",
       "schedule": {
         ".validate": "newData.hasChildren(['hour', 'minute', 'doseCount'])",
-        "hour":      { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 23" },
-        "minute":    { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 59" },
-        "doseCount": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 10" },
-        "med":       { ".validate": "newData.isString() && newData.val().length <= 40" },
-        "timestamp": { ".validate": "newData.isNumber()" },
-        "$other":    { ".validate": false }
+        "hour": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 23"
+        },
+        "minute": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 59"
+        },
+        "doseCount": {
+          ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 10"
+        },
+        "med": {
+          ".validate": "newData.isString() && newData.val().length <= 40"
+        },
+        "timestamp": {
+          ".validate": "newData.isNumber()"
+        },
+        "$other": {
+          ".validate": false
+        }
       },
       "voice": {
-        "mode": { ".validate": "newData.isString() && newData.val().matches(/^(en|kn|both)$/)" }
+        "mode": {
+          ".validate": "newData.isString() && newData.val().matches(/^(en|kn|both)$/)"
+        }
       },
       "command": {
         ".validate": "newData.hasChildren(['id', 'cmd'])",
-        "id":  { ".validate": "newData.isString() && newData.val().length <= 20" },
-        "cmd": { ".validate": "newData.isString() && newData.val().matches(/^(test_alert|reset_counters)$/)" },
-        "at":  { ".validate": "newData.isNumber()" },
-        "$other": { ".validate": false }
+        "id": {
+          ".validate": "newData.isString() && newData.val().length <= 20"
+        },
+        "cmd": {
+          ".validate": "newData.isString() && newData.val().matches(/^(test_alert|reset_counters)$/)"
+        },
+        "at": {
+          ".validate": "newData.isNumber()"
+        },
+        "$other": {
+          ".validate": false
+        }
       },
       "prediction": {
-        "riskLevel": { ".validate": "newData.isString() && newData.val().matches(/^(LOW|MEDIUM|HIGH)$/)" }
+        "riskLevel": {
+          ".validate": "newData.isString() && newData.val().matches(/^(LOW|MEDIUM|HIGH)$/)"
+        }
       }
     }
   }
