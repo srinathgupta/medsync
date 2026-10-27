@@ -1,0 +1,1816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MedSync — Smart Dispenser Dashboard</title>
+<meta name="description" content="MedSync smart medicine dispenser dashboard — real-time dose tracking, compliance monitoring, and caregiver alerts powered by Firebase.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<style>
+/* ═══════════════════════════════════════════════
+   DESIGN TOKENS
+═══════════════════════════════════════════════ */
+:root {
+  --bg:#0a0d14; --panel:#111520; --panel-alt:#161b28;
+  --border:#1e2535; --border-hi:#2a3450;
+  --accent:#00e5b0; --accent2:#005aff;
+  --warn:#ffd600; --danger:#ff3d5a;
+  --text:#e8eaf0; --text-dim:#6b7494; --text-mid:#9ba3c2;
+  --mono:'Space Mono',monospace; --sans:'Syne',sans-serif;
+  --r:10px; --r-lg:16px;
+  --glow-danger: 0 0 0 1px rgba(255,61,90,.5), 0 0 24px rgba(255,61,90,.25);
+  --glow-warn:   0 0 0 1px rgba(255,214,0,.4),  0 0 24px rgba(255,214,0,.2);
+}
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0 }
+html { scroll-behavior: smooth }
+body {
+  background:var(--bg); color:var(--text);
+  font-family:var(--sans); min-height:100vh; overflow-x:hidden;
+}
+body::before {
+  content:''; position:fixed; inset:0; z-index:0;
+  background-image:
+    repeating-linear-gradient(0deg,transparent,transparent 39px,var(--border) 40px),
+    repeating-linear-gradient(90deg,transparent,transparent 39px,var(--border) 40px);
+  opacity:.35; pointer-events:none;
+}
+
+/* ═══════════════════════════════════════════════
+   HEADER
+═══════════════════════════════════════════════ */
+header {
+  position:relative; z-index:10;
+  display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;
+  padding:16px 40px;
+  border-bottom:1px solid var(--border);
+  background:rgba(10,13,20,.92); backdrop-filter:blur(10px);
+}
+.logo { display:flex; align-items:center; gap:12px }
+.logo-icon {
+  width:40px; height:40px; background:var(--accent);
+  border-radius:10px; display:grid; place-items:center; font-size:20px;
+  box-shadow: 0 0 16px rgba(0,229,176,.3);
+}
+.logo-text { font-size:22px; font-weight:800; letter-spacing:-.5px }
+.logo-text span { color:var(--accent) }
+.header-center { display:flex; align-items:center; gap:12px; flex-wrap:wrap }
+.patient-chip {
+  display:none; align-items:center; gap:8px;
+  padding:6px 14px; border:1px solid rgba(0,229,176,.25);
+  border-radius:100px; font-size:12px; font-weight:700;
+  background:rgba(0,229,176,.07); color:var(--accent);
+  animation:fadeSlideIn .4s ease;
+}
+.patient-chip .pc-name { font-size:13px }
+.patient-chip .pc-age  { font-size:11px; color:var(--text-dim) }
+.greeting-text { font-size:12px; color:var(--text-dim); font-family:var(--mono) }
+.header-right { display:flex; align-items:center; gap:16px }
+.status-pill {
+  display:flex; align-items:center; gap:8px;
+  padding:6px 14px; border:1px solid var(--border-hi);
+  border-radius:100px; font-family:var(--mono); font-size:11px; color:var(--text-mid);
+}
+.status-dot {
+  width:8px; height:8px; border-radius:50%;
+  background:var(--danger); animation:pulse-dot 2s infinite;
+}
+.status-dot.online { background:var(--accent) }
+@keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.3} }
+#clock-display { font-family:var(--mono); font-size:13px; color:var(--text-dim) }
+
+/* Edit profile button */
+.btn-ghost {
+  background:transparent; border:1px solid var(--border-hi);
+  color:var(--text-dim); border-radius:var(--r); padding:7px 14px;
+  font-family:var(--sans); font-size:12px; font-weight:600;
+  cursor:pointer; transition:all .2s; display:none;
+}
+.btn-ghost:hover { border-color:var(--accent); color:var(--accent) }
+
+/* ═══════════════════════════════════════════════
+   LAYOUT
+═══════════════════════════════════════════════ */
+main {
+  position:relative; z-index:1;
+  max-width:1280px; margin:0 auto;
+  padding:32px 40px 80px;
+  display:grid;
+  grid-template-columns: 300px 1fr;
+  grid-template-rows: auto auto auto auto;
+  gap:20px;
+}
+
+/* ═══════════════════════════════════════════════
+   PANELS
+═══════════════════════════════════════════════ */
+.panel {
+  background:var(--panel); border:1px solid var(--border);
+  border-radius:var(--r-lg); padding:24px;
+  position:relative; overflow:hidden;
+  animation:fadeSlideIn .5s ease backwards;
+  transition: border-color .4s, box-shadow .4s;
+}
+.panel::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:1px;
+  background:linear-gradient(90deg,transparent,var(--accent2),transparent);
+  opacity:.4;
+}
+/* Alert state — panel border glows */
+.panel.state-alert  { border-color:rgba(255,214,0,.5);  box-shadow:var(--glow-warn) }
+.panel.state-missed { border-color:rgba(255,61,90,.5);  box-shadow:var(--glow-danger) }
+.panel.state-missed::before,
+.panel.state-alert::before { opacity: 1 }
+
+.panel-title {
+  font-size:11px; font-weight:700; letter-spacing:2px;
+  text-transform:uppercase; color:var(--text-dim);
+  margin-bottom:18px;
+  display:flex; align-items:center; gap:10px;
+}
+.panel-title::after { content:''; flex:1; height:1px; background:var(--border) }
+
+/* ── Grid placements ── */
+.config-panel  { grid-column:1; grid-row:1/3 }
+.status-panel  { grid-column:2; grid-row:1 }
+.log-panel     { grid-column:2; grid-row:2 }
+.chart-panel   { grid-column:1/-1; grid-row:3 }
+.dev-panel     { grid-column:1/-1; grid-row:4 }
+
+/* ═══════════════════════════════════════════════
+   FORMS / CONFIG
+═══════════════════════════════════════════════ */
+label {
+  display:block; font-size:11px; font-weight:700;
+  letter-spacing:1.5px; text-transform:uppercase;
+  color:var(--text-dim); margin-bottom:8px;
+}
+input[type=text],input[type=time],input[type=email],input[type=number],select {
+  width:100%; background:var(--bg); border:1px solid var(--border-hi);
+  border-radius:var(--r); padding:11px 14px;
+  color:var(--text); font-family:var(--mono); font-size:14px;
+  outline:none; transition:border-color .2s, box-shadow .2s;
+}
+input:focus, select:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(0,229,176,.1) }
+select { cursor:pointer }
+input[type=time]::-webkit-calendar-picker-indicator { filter:invert(.7); cursor:pointer }
+.dose-stepper {
+  display:flex; align-items:center;
+  border:1px solid var(--border-hi); border-radius:var(--r);
+  overflow:hidden; background:var(--bg);
+}
+.step-btn {
+  background:var(--panel-alt); border:none; color:var(--text);
+  width:44px; height:44px; font-size:20px; font-weight:700;
+  cursor:pointer; transition:background .15s,color .15s;
+}
+.step-btn:hover { background:var(--border-hi); color:var(--accent) }
+.dose-value {
+  flex:1; text-align:center;
+  font-family:var(--mono); font-size:18px; font-weight:700; color:var(--accent);
+}
+.btn {
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  width:100%; padding:13px 18px; border:none; border-radius:var(--r);
+  font-family:var(--sans); font-size:15px; font-weight:700;
+  cursor:pointer; transition:all .2s;
+}
+.btn-primary { background:var(--accent); color:#000 }
+.btn-primary:hover {
+  background:#00ffca; transform:translateY(-1px);
+  box-shadow:0 8px 24px rgba(0,229,176,.3);
+}
+.btn-secondary {
+  background:transparent; border:1px solid var(--border-hi); color:var(--text-mid);
+}
+.btn-secondary:hover { border-color:var(--accent); color:var(--accent) }
+.field-row { margin-bottom:14px }
+
+/* ═══════════════════════════════════════════════
+   STATUS PANEL — STAT CARDS
+═══════════════════════════════════════════════ */
+.status-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:18px }
+.stat-card {
+  background:var(--bg); border:1px solid var(--border);
+  border-radius:var(--r); padding:18px; text-align:center;
+  transition: border-color .3s, box-shadow .3s;
+}
+.stat-value {
+  font-family:var(--mono); font-size:30px; font-weight:700;
+  line-height:1; margin-bottom:6px;
+}
+.stat-label {
+  font-size:10px; font-weight:600;
+  letter-spacing:1.5px; text-transform:uppercase; color:var(--text-dim);
+}
+.dispensed .stat-value { color:var(--accent2) }
+.confirmed .stat-value { color:var(--accent) }
+.missed    .stat-value { color:var(--danger) }
+/* glow when missed > 0 */
+.missed.has-misses {
+  border-color:rgba(255,61,90,.4);
+  box-shadow:0 0 16px rgba(255,61,90,.15);
+  animation:miss-pulse 2.5s ease-in-out infinite;
+}
+@keyframes miss-pulse {
+  0%,100% { box-shadow:0 0 12px rgba(255,61,90,.15) }
+  50%     { box-shadow:0 0 28px rgba(255,61,90,.35) }
+}
+
+.device-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px }
+.state-badge {
+  display:inline-flex; align-items:center; gap:8px;
+  padding:6px 14px; border-radius:100px;
+  font-family:var(--mono); font-size:11px; font-weight:700;
+  letter-spacing:1px; text-transform:uppercase; border:1px solid;
+}
+.state-badge.IDLE,.state-badge.CONFIRMED { background:rgba(0,229,176,.1); border-color:rgba(0,229,176,.3); color:var(--accent) }
+.state-badge.ALERT      { background:rgba(255,214,0,.1); border-color:rgba(255,214,0,.4); color:var(--warn) }
+.state-badge.DISPENSING { background:rgba(0,90,255,.1);  border-color:rgba(0,90,255,.4);  color:#6f9fff }
+.state-badge.MISSED     { background:rgba(255,61,90,.1); border-color:rgba(255,61,90,.3); color:var(--danger); animation:miss-pulse-badge 1.2s ease-in-out infinite }
+.state-badge.BOOT       { background:rgba(107,116,148,.1); border-color:rgba(107,116,148,.3); color:var(--text-dim) }
+.state-badge.RTC_ERROR,
+.state-badge.OFFLINE    { background:rgba(255,61,90,.15); border-color:rgba(255,61,90,.5); color:var(--danger) }
+@keyframes miss-pulse-badge { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+/* Alert banner — appears when ALERT or MISSED */
+#alert-banner {
+  display:none; align-items:center; gap:12px;
+  margin-bottom:16px; padding:12px 16px;
+  border-radius:var(--r); border:1px solid;
+  font-size:13px; font-weight:700; font-family:var(--mono);
+  animation:fadeSlideIn .3s ease;
+}
+#alert-banner.show { display:flex }
+#alert-banner.alert-warn  { background:rgba(255,214,0,.1); border-color:rgba(255,214,0,.4); color:var(--warn) }
+#alert-banner.alert-danger { background:rgba(255,61,90,.12); border-color:rgba(255,61,90,.4); color:var(--danger) }
+.alert-icon { font-size:18px; animation:shake 0.6s ease infinite }
+@keyframes shake { 0%,100%{transform:rotate(0)} 25%{transform:rotate(-8deg)} 75%{transform:rotate(8deg)} }
+
+/* mini boxes */
+.mini-box { margin-top:16px; padding:14px; background:var(--bg); border:1px solid var(--border); border-radius:var(--r) }
+.mini-label { font-size:11px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:var(--text-dim) }
+.big { font-family:var(--mono); font-size:24px; font-weight:700 }
+.small { font-size:11px; color:var(--text-dim) }
+.bar { height:8px; background:var(--bg); border-radius:100px; overflow:hidden; border:1px solid var(--border) }
+.bar>div { height:100%; border-radius:100px; width:0; transition:width 1s ease }
+
+/* risk badge */
+.log-badge {
+  display:inline-block; padding:3px 10px; border-radius:100px;
+  font-size:10px; font-weight:700; letter-spacing:.5px;
+}
+.log-badge.confirmed { background:rgba(0,229,176,.12); color:var(--accent) }
+.log-badge.missed    { background:rgba(255,61,90,.12);  color:var(--danger) }
+.log-badge.dispensed { background:rgba(0,90,255,.12);   color:#6f9fff }
+
+/* ═══════════════════════════════════════════════
+   ACTIVITY LOG
+═══════════════════════════════════════════════ */
+.log-table { width:100%; border-collapse:collapse; font-size:13px }
+.log-table th {
+  text-align:left; font-size:10px; font-weight:700;
+  letter-spacing:1.5px; text-transform:uppercase;
+  color:var(--text-dim); padding:0 12px 12px;
+  border-bottom:1px solid var(--border);
+}
+.log-table td {
+  padding:11px 12px; border-bottom:1px solid var(--border);
+  font-family:var(--mono); color:var(--text-mid); vertical-align:middle;
+}
+.log-table tr:last-child td { border-bottom:none }
+.log-table tr:hover td { background:rgba(255,255,255,.02) }
+.log-scroll { max-height:560px; overflow:auto; border-radius:var(--r) }
+.log-scroll .log-table th { position:sticky; top:0; background:var(--panel); z-index:1; padding-top:4px }
+.log-toolbar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px }
+.log-toolbar select { width:auto; padding:6px 10px; font-size:12px }
+.empty-state {
+  text-align:center; padding:40px 20px; color:var(--text-dim);
+}
+.empty-state .es-icon { font-size:36px; margin-bottom:10px; opacity:.4 }
+.empty-state .es-text { font-size:13px; font-family:var(--mono) }
+
+/* ═══════════════════════════════════════════════
+   7-DAY CHART
+═══════════════════════════════════════════════ */
+.chart-area { display:flex; gap:8px; align-items:flex-end; height:100px; padding-top:8px }
+.chart-day {
+  flex:1; display:flex; flex-direction:column;
+  align-items:center; gap:6px;
+}
+.chart-bar-wrap {
+  width:100%; height:80px; display:flex;
+  flex-direction:column; justify-content:flex-end;
+  background:var(--bg); border-radius:6px;
+  border:1px solid var(--border); overflow:hidden;
+  position:relative;
+}
+.chart-bar-fill {
+  width:100%; border-radius:4px 4px 0 0;
+  transition:height .8s ease;
+  background:linear-gradient(180deg, var(--accent2), var(--accent));
+}
+.chart-bar-fill.missed-day { background:linear-gradient(180deg, var(--danger), rgba(255,61,90,.6)) }
+.chart-bar-fill.empty-day  { background:var(--border-hi); height:4px !important }
+.chart-day-label { font-family:var(--mono); font-size:10px; color:var(--text-dim) }
+.chart-day-pct   { font-family:var(--mono); font-size:10px; color:var(--text-mid) }
+.chart-legend {
+  display:flex; gap:16px; margin-top:14px; flex-wrap:wrap;
+}
+.legend-item { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-dim) }
+.legend-dot  { width:10px; height:10px; border-radius:3px }
+
+/* ═══════════════════════════════════════════════
+   LCD MOCKUP
+═══════════════════════════════════════════════ */
+.lcd-mockup {
+  background:#0f1e0f; border:2px solid #1e3a1e;
+  border-radius:8px; padding:14px 18px; margin-top:18px;
+  box-shadow:inset 0 0 24px rgba(0,0,0,.7), 0 0 8px rgba(0,255,100,.05);
+}
+.lcd-line {
+  font-family:'Courier New',monospace; font-size:15px; font-weight:700;
+  color:#00ff66; text-shadow:0 0 8px rgba(0,255,100,.6);
+  letter-spacing:2px; min-height:22px; white-space:nowrap;
+  overflow:hidden; border-right:2px solid transparent;
+}
+.lcd-line.blink-cursor {
+  border-right-color:#00ff66;
+  animation:blink-cur 1s step-end infinite;
+}
+@keyframes blink-cur { 50%{border-right-color:transparent} }
+
+/* ═══════════════════════════════════════════════
+   DEVELOPER PANEL (collapsible)
+═══════════════════════════════════════════════ */
+.dev-toggle {
+  display:flex; align-items:center; gap:10px;
+  cursor:pointer; user-select:none;
+  font-size:11px; font-weight:700; letter-spacing:2px;
+  text-transform:uppercase; color:var(--text-dim);
+}
+.dev-toggle::after { content:''; flex:1; height:1px; background:var(--border) }
+.dev-toggle-arrow {
+  font-size:14px; transition:transform .25s;
+  margin-left:6px;
+}
+.dev-toggle.open .dev-toggle-arrow { transform:rotate(180deg) }
+.dev-body { display:none; margin-top:20px }
+.dev-body.open { display:block }
+.api-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14px }
+.api-card { background:var(--bg); border:1px solid var(--border); border-radius:var(--r); padding:18px }
+.api-method {
+  display:inline-block; font-family:var(--mono); font-size:10px;
+  font-weight:700; padding:3px 8px; border-radius:4px; margin-bottom:8px;
+}
+.api-method.GET  { background:rgba(0,229,176,.15); color:var(--accent) }
+.api-method.POST { background:rgba(0,90,255,.15);  color:#6f9fff }
+.api-path  { font-family:var(--mono); font-size:13px; margin-bottom:6px }
+.api-desc  { font-size:12px; color:var(--text-dim); margin-bottom:10px }
+.code-block {
+  background:var(--panel); border:1px solid var(--border-hi);
+  border-radius:6px; padding:12px;
+  font-family:var(--mono); font-size:11px; color:var(--accent);
+  white-space:pre; overflow-x:auto; line-height:1.7;
+}
+
+/* ═══════════════════════════════════════════════
+   TOAST
+═══════════════════════════════════════════════ */
+#toast {
+  position:fixed; bottom:28px; right:28px; z-index:2000;
+  padding:13px 22px; border-radius:var(--r);
+  font-size:13px; font-weight:600;
+  opacity:0; transform:translateY(12px);
+  transition:all .3s; pointer-events:none; border:1px solid;
+  max-width:320px;
+}
+#toast.show { opacity:1; transform:translateY(0) }
+#toast.success { background:rgba(0,229,176,.15); border-color:rgba(0,229,176,.4); color:var(--accent) }
+#toast.error   { background:rgba(255,61,90,.15);  border-color:rgba(255,61,90,.4);  color:var(--danger) }
+
+/* ═══════════════════════════════════════════════
+   ONBOARDING OVERLAY
+═══════════════════════════════════════════════ */
+#onboarding-overlay {
+  position:fixed; inset:0; z-index:9999;
+  background:rgba(5,7,12,.92); backdrop-filter:blur(8px);
+  display:flex; align-items:center; justify-content:center;
+  padding:20px;
+}
+#onboarding-modal {
+  background:var(--panel); border:1px solid var(--border-hi);
+  border-radius:20px; padding:36px 40px;
+  width:100%; max-width:540px; max-height:92vh; overflow-y:auto;
+  position:relative; animation:fadeSlideIn .45s ease;
+  box-shadow:0 32px 80px rgba(0,0,0,.7), 0 0 0 1px rgba(0,229,176,.08);
+}
+#onboarding-modal::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:2px;
+  background:linear-gradient(90deg, var(--accent2), var(--accent), var(--accent2));
+  border-radius:20px 20px 0 0;
+}
+.ob-header { text-align:center; margin-bottom:28px }
+.ob-logo { font-size:32px; margin-bottom:8px }
+.ob-title { font-size:22px; font-weight:800; margin-bottom:4px }
+.ob-title span { color:var(--accent) }
+.ob-sub { font-size:13px; color:var(--text-dim); font-family:var(--mono) }
+
+/* Step indicator */
+.ob-steps {
+  display:flex; justify-content:center; gap:8px; margin-bottom:28px;
+}
+.ob-step-dot {
+  display:flex; flex-direction:column; align-items:center; gap:4px; cursor:default;
+}
+.ob-step-dot .dot {
+  width:10px; height:10px; border-radius:50%;
+  background:var(--border-hi); transition:all .3s;
+}
+.ob-step-dot.active .dot   { background:var(--accent); box-shadow:0 0 8px rgba(0,229,176,.5) }
+.ob-step-dot.done .dot     { background:var(--accent2) }
+.ob-step-dot .dot-label    { font-size:9px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.5px }
+.ob-step-connector { width:40px; height:1px; background:var(--border); align-self:flex-start; margin-top:5px }
+
+/* Step content */
+.ob-step-content { display:none }
+.ob-step-content.active { display:block; animation:fadeSlideIn .3s ease }
+.ob-field { margin-bottom:16px }
+.ob-field-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px }
+.ob-section-label {
+  font-size:10px; font-weight:700; letter-spacing:2px;
+  text-transform:uppercase; color:var(--text-dim);
+  margin:20px 0 12px; display:flex; align-items:center; gap:8px;
+}
+.ob-section-label::after { content:''; flex:1; height:1px; background:var(--border) }
+.ob-optional { font-size:9px; color:var(--text-dim); margin-left:6px; font-weight:400; letter-spacing:0; text-transform:none }
+
+/* Radio questions */
+.ob-question { margin-bottom:20px }
+.ob-q-label { font-size:13px; font-weight:700; color:var(--text); margin-bottom:10px; line-height:1.4 }
+.ob-options { display:flex; flex-direction:column; gap:8px }
+.ob-option {
+  display:flex; align-items:center; gap:10px;
+  padding:10px 14px; border:1px solid var(--border-hi);
+  border-radius:var(--r); cursor:pointer;
+  transition:border-color .2s, background .2s;
+}
+.ob-option:hover { border-color:var(--accent); background:rgba(0,229,176,.04) }
+.ob-option input[type=radio] { accent-color:var(--accent); width:15px; height:15px; cursor:pointer }
+.ob-option-label { font-size:13px; color:var(--text-mid); cursor:pointer }
+.ob-option:has(input:checked) {
+  border-color:var(--accent);
+  background:rgba(0,229,176,.07);
+}
+.ob-option:has(input:checked) .ob-option-label { color:var(--text) }
+
+/* Info callout */
+.ob-callout {
+  background:rgba(0,229,176,.06); border:1px solid rgba(0,229,176,.2);
+  border-left:3px solid var(--accent);
+  border-radius:var(--r); padding:12px 14px;
+  font-size:12px; color:var(--text-mid); line-height:1.6;
+  margin-top:16px;
+}
+.ob-callout strong { color:var(--accent) }
+
+/* Onboarding nav buttons */
+.ob-nav { display:flex; gap:10px; margin-top:24px }
+.ob-nav .btn { flex:1 }
+.ob-err { font-size:11px; color:var(--danger); font-family:var(--mono); margin-top:6px; min-height:16px }
+
+/* ═══════════════════════════════════════════════
+   ANIMATIONS
+═══════════════════════════════════════════════ */
+@keyframes fadeSlideIn {
+  from { opacity:0; transform:translateY(16px) }
+  to   { opacity:1; transform:translateY(0) }
+}
+
+/* ═══════════════════════════════════════════════
+   RESPONSIVE
+═══════════════════════════════════════════════ */
+@media(max-width:960px) {
+  main {
+    grid-template-columns:1fr;
+    padding:16px 16px 60px;
+  }
+  /* Mobile order: Status first, then Config, then Log, then Chart, Dev */
+  .status-panel { grid-column:1; grid-row:1 }
+  .config-panel { grid-column:1; grid-row:2 }
+  .log-panel    { grid-column:1; grid-row:3 }
+  .chart-panel  { grid-column:1; grid-row:4 }
+  .dev-panel    { grid-column:1; grid-row:5 }
+  .api-grid     { grid-template-columns:1fr }
+  header        { padding:14px 16px }
+}
+@media(max-width:500px) {
+  .status-grid { grid-template-columns:1fr 1fr }
+  header       { flex-direction:column; align-items:flex-start }
+  #onboarding-modal { padding:24px 20px }
+  .ob-field-row { grid-template-columns:1fr }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════
+  HEADER
+═══════════════════════════════════════ -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">💊</div>
+    <div class="logo-text">Med<span>Sync</span></div>
+  </div>
+  <div class="header-center">
+    <div class="patient-chip" id="patient-chip">
+      <span>👤</span>
+      <span class="pc-name" id="pc-name">—</span>
+      <span class="pc-age"  id="pc-age"></span>
+    </div>
+    <div class="greeting-text" id="greeting-text"></div>
+  </div>
+  <div class="header-right">
+    <button class="btn-ghost" id="edit-profile-btn" onclick="showOnboarding(true)">✏️ Edit Profile</button>
+    <div class="status-pill">
+      <div class="status-dot" id="conn-dot"></div>
+      <span id="conn-text">Disconnected</span>
+    </div>
+    <div id="clock-display">--:--:--</div>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════
+  MAIN DASHBOARD
+═══════════════════════════════════════ -->
+<main>
+
+  <!-- ── CONFIG PANEL ── -->
+  <section class="panel config-panel" style="animation-delay:.05s">
+    <div class="panel-title">Device Configuration</div>
+    <div id="firebase-note" class="small" style="margin-bottom:16px;font-family:var(--mono)">Connecting to Firebase…</div>
+    <hr style="border:none;border-top:1px solid var(--border);margin-bottom:16px">
+
+    <div class="field-row"><label>Dispensing Time</label><input type="time" id="dispense-time" value="08:00"></div>
+    <div class="field-row"><label>Capsules per Dose</label>
+      <div class="dose-stepper">
+        <button class="step-btn" onclick="adjustDose(-1)">−</button>
+        <div class="dose-value" id="dose-display">1</div>
+        <button class="step-btn" onclick="adjustDose(1)">+</button>
+      </div>
+    </div>
+    <div class="field-row"><label>Medicine Name</label><input type="text" id="med-name" placeholder="e.g. Metformin 500mg"></div>
+    <div class="field-row">
+      <label>Caregiver Email</label>
+      <input type="email" id="caregiver-email" placeholder="caregiver@example.com" onblur="saveCaregiverEmail()">
+      <div id="caregiver-status" class="small" style="font-family:var(--mono);margin-top:6px"></div>
+    </div>
+    <div class="field-row">
+      <label>Reminder Voice</label>
+      <select id="voice-lang" onchange="saveVoiceLang()">
+        <option value="both">English + Kannada (alternate)</option>
+        <option value="en">English only</option>
+        <option value="kn">Kannada only</option>
+      </select>
+      <div id="voice-status" class="small" style="font-family:var(--mono);margin-top:6px">The dispenser picks this up within about a minute.</div>
+    </div>
+
+    <button class="btn btn-primary" onclick="sendSchedule()">⟶ Send Schedule to Cloud</button>
+    <div id="sync-status" class="small" style="font-family:var(--mono);margin-top:8px;min-height:16px"></div>
+
+    <div style="margin-top:18px">
+      <div class="panel-title" style="font-size:10px">Device Controls</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary" style="flex:1;min-width:140px;font-size:13px;padding:10px" onclick="sendCommand('test_alert')">🔔 Test alert now</button>
+        <button class="btn btn-secondary" style="flex:1;min-width:140px;font-size:13px;padding:10px" onclick="resetAllData()">♻ Reset counters &amp; history</button>
+      </div>
+      <div id="cmd-status" class="small" style="font-family:var(--mono);margin-top:6px;min-height:16px"></div>
+    </div>
+
+    <div style="margin-top:20px">
+      <div class="panel-title" style="font-size:10px">LCD Preview</div>
+      <div class="lcd-mockup">
+        <div class="lcd-line blink-cursor" id="lcd-l1">Time: --:--:--  </div>
+        <div class="lcd-line" id="lcd-l2">No schedule set </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── STATUS PANEL ── -->
+  <section class="panel status-panel" id="status-panel" style="animation-delay:.1s">
+    <div class="device-row">
+      <div class="panel-title" style="margin-bottom:0">Device Status</div>
+      <span class="state-badge IDLE" id="state-badge">IDLE</span>
+    </div>
+    <div id="device-health" class="small" style="font-family:var(--mono);margin:-6px 0 12px">Waiting for the dispenser…</div>
+
+    <!-- Alert banner -->
+    <div id="alert-banner">
+      <span class="alert-icon" id="alert-icon">⚠️</span>
+      <span id="alert-banner-text">—</span>
+    </div>
+
+    <div class="status-grid">
+      <div class="stat-card dispensed"><div class="stat-value" id="stat-dispensed">0</div><div class="stat-label">Dispensed</div></div>
+      <div class="stat-card confirmed"><div class="stat-value" id="stat-confirmed">0</div><div class="stat-label">Confirmed</div></div>
+      <div class="stat-card missed"   ><div class="stat-value" id="stat-missed">0</div><div class="stat-label">Missed</div></div>
+    </div>
+
+    <div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+        <span class="mini-label">Compliance Rate</span>
+        <span style="font-family:var(--mono);font-size:13px;color:var(--accent)" id="compliance-pct">— %</span>
+      </div>
+      <div class="bar"><div id="compliance-bar" style="background:linear-gradient(90deg,var(--accent2),var(--accent))"></div></div>
+    </div>
+
+    <div class="mini-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span class="mini-label">Predicted Miss Risk</span>
+        <span class="log-badge" id="risk-badge" style="background:rgba(107,116,148,.15);color:var(--text-dim)">—</span>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px">
+        <span class="big" style="color:var(--warn)" id="risk-pct">—</span>
+        <span class="small" id="risk-sample">Learning from history…</span>
+      </div>
+      <div class="bar" style="height:6px"><div id="risk-bar" style="background:linear-gradient(90deg,var(--accent),var(--warn),var(--danger))"></div></div>
+    </div>
+
+    <div class="mini-box">
+      <div class="mini-label" style="font-size:10px;margin-bottom:10px">Active Schedule</div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap">
+        <div><div class="big" style="color:var(--accent)" id="active-time">--:--</div><div class="small">Next dose</div></div>
+        <div><div class="big" style="color:var(--accent2)" id="active-dose">-</div><div class="small">Capsules</div></div>
+        <div><div class="big" style="color:var(--text-mid)" id="device-time">--:--:--</div><div class="small">Device clock</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── LOG PANEL ── -->
+  <section class="panel log-panel" style="animation-delay:.15s">
+    <div class="panel-title">Dose Activity Log</div>
+    <div class="log-toolbar">
+      <span class="small" id="log-count" style="font-family:var(--mono)">—</span>
+      <select id="log-filter" onchange="applyHistory(latestHistory)">
+        <option value="all">All entries</option>
+        <option value="confirmed">Confirmed only</option>
+        <option value="missed">Missed only</option>
+        <option value="dispensed">Dispensed only</option>
+      </select>
+    </div>
+    <div class="log-scroll">
+    <table class="log-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Date</th>
+          <th>Time</th>
+          <th>Medicine</th>
+          <th>Caps</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="log-tbody">
+        <tr><td colspan="6">
+          <div class="empty-state">
+            <div class="es-icon">📋</div>
+            <div class="es-text">Waiting for cloud data…</div>
+          </div>
+        </td></tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <!-- ── 7-DAY CHART ── -->
+  <section class="panel chart-panel" style="animation-delay:.2s">
+    <div class="panel-title">7-Day Compliance Overview</div>
+    <div class="chart-area" id="chart-area">
+      <!-- Bars rendered by JS -->
+    </div>
+    <div class="chart-legend">
+      <div class="legend-item"><div class="legend-dot" style="background:linear-gradient(var(--accent2),var(--accent))"></div>Doses taken</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--danger)"></div>Missed doses</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--border-hi)"></div>No data</div>
+    </div>
+  </section>
+
+  <!-- ── DEVELOPER PANEL (collapsed by default) ── -->
+  <section class="panel dev-panel" style="animation-delay:.25s">
+    <div class="dev-toggle" id="dev-toggle" onclick="toggleDev()">
+      🔧 Developer · Firebase Data Structure
+      <span class="dev-toggle-arrow">▼</span>
+    </div>
+    <div class="dev-body" id="dev-body">
+      <div class="api-grid">
+        <div class="api-card"><span class="api-method GET">READ</span><div class="api-path">device/status</div><div class="api-desc">ESP32 writes every 10 s and on every change. lastSeen is the Firebase server time (online check).</div>
+<div class="code-block">{ "state": "IDLE", "time": "14:23:05",
+  "scheduleHour": 8, "scheduleMinute": 0,
+  "doseCount": 2, "scheduleValid": true,
+  "voiceMode": "both", "outboxPending": 0,
+  "fw": "4.0.0", "lastSeen": 1761... }</div></div>
+        <div class="api-card"><span class="api-method POST">WRITE</span><div class="api-path">device/schedule</div><div class="api-desc">Web app writes; ESP32 reads it every 8 s and reports what it runs in device/status.</div>
+<div class="code-block">{ "hour": 8, "minute": 30, "doseCount": 2,
+  "med": "Metformin", "timestamp": 1737... }</div></div>
+        <div class="api-card"><span class="api-method POST">WRITE</span><div class="api-path">device/prediction</div><div class="api-desc">TF.js logistic regression (≥20 doses) or Bayesian fallback.</div>
+<div class="code-block">{ "riskScore": 62, "riskLevel": "HIGH",
+  "sampleSize": 24, "method": "ml",
+  "computedAt": 1737... }</div></div>
+        <div class="api-card"><span class="api-method GET">READ</span><div class="api-path">device/history · device/log</div><div class="api-desc">History key = doseId_status, row {time, med, dose, status, timestamp (UTC s), doseId, sched}. Log: device counters.</div>
+<div class="code-block">{ "totalDispensed": 14,
+  "totalConfirmed": 12, "totalMissed": 2 }</div></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ═══════════════════════════════════════
+  ONBOARDING OVERLAY
+═══════════════════════════════════════ -->
+<div id="onboarding-overlay">
+  <div id="onboarding-modal">
+    <div class="ob-header">
+      <div class="ob-logo">💊</div>
+      <div class="ob-title">Welcome to <span>MedSync</span></div>
+      <div class="ob-sub" id="ob-sub">Let's set up the patient profile — takes under a minute.</div>
+    </div>
+
+    <!-- Step dots -->
+    <div class="ob-steps">
+      <div class="ob-step-dot active" id="dot-1">
+        <div class="dot"></div><div class="dot-label">Patient</div>
+      </div>
+      <div class="ob-step-connector"></div>
+      <div class="ob-step-dot" id="dot-2">
+        <div class="dot"></div><div class="dot-label">Caregiver</div>
+      </div>
+      <div class="ob-step-connector"></div>
+      <div class="ob-step-dot" id="dot-3">
+        <div class="dot"></div><div class="dot-label">Quiz</div>
+      </div>
+    </div>
+
+    <!-- ── STEP 1: Patient Info ── -->
+    <div class="ob-step-content active" id="ob-step-1">
+      <div class="ob-field">
+        <label>Patient Full Name <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="ob-patient-name" placeholder="e.g. Ravi Kumar" autocomplete="off">
+      </div>
+      <div class="ob-field">
+        <label>Patient Age <span style="color:var(--danger)">*</span></label>
+        <input type="number" id="ob-patient-age" placeholder="e.g. 68" min="1" max="120">
+      </div>
+      <div class="ob-field">
+        <label>Patient Email <span style="color:var(--text-dim)">(optional — patient also gets reminders)</span></label>
+        <input type="email" id="ob-patient-email" placeholder="patient@example.com" autocomplete="off">
+      </div>
+      <div class="ob-err" id="ob-err-1"></div>
+      <div class="ob-nav">
+        <button class="btn btn-primary" onclick="obNext(1)">Next → Caregiver</button>
+      </div>
+    </div>
+
+    <!-- ── STEP 2: Caregiver(s) ── -->
+    <div class="ob-step-content" id="ob-step-2">
+      <div class="ob-section-label">Primary Caregiver</div>
+      <div class="ob-field-row">
+        <div>
+          <label>Name <span style="color:var(--danger)">*</span></label>
+          <input type="text" id="ob-cg1-name" placeholder="e.g. Priya Kumar">
+        </div>
+        <div>
+          <label>Email <span style="color:var(--danger)">*</span></label>
+          <input type="email" id="ob-cg1-email" placeholder="priya@example.com">
+        </div>
+      </div>
+      <div class="ob-section-label">Secondary Caregiver <span class="ob-optional">(optional)</span></div>
+      <div class="ob-field-row">
+        <div>
+          <label>Name</label>
+          <input type="text" id="ob-cg2-name" placeholder="e.g. Arjun Kumar">
+        </div>
+        <div>
+          <label>Email</label>
+          <input type="email" id="ob-cg2-email" placeholder="arjun@example.com">
+        </div>
+      </div>
+      <div class="ob-callout">
+        <strong>📧 Email alerts are enabled.</strong> Both caregivers will receive an
+        instant email whenever a dose is missed.
+      </div>
+      <div class="ob-err" id="ob-err-2"></div>
+      <div class="ob-nav">
+        <button class="btn btn-secondary" onclick="obPrev(2)">← Back</button>
+        <button class="btn btn-primary"   onclick="obNext(2)">Next → Risk Quiz</button>
+      </div>
+    </div>
+
+    <!-- ── STEP 3: Forgetfulness Quiz ── -->
+    <div class="ob-step-content" id="ob-step-3">
+      <p id="ob-quiz-sub" style="font-size:12px;color:var(--text-dim);font-family:var(--mono);margin-bottom:20px;line-height:1.5">
+        Help us personalise the miss-risk prediction for <strong style="color:var(--accent)" id="ob-patient-name-display">the patient</strong>.
+        These answers set the initial baseline — the AI takes over as real data accumulates.
+      </p>
+
+      <!-- Q1 -->
+      <div class="ob-question">
+        <div class="ob-q-label">Q1 &nbsp;How often does the patient forget to take medicine without a reminder?</div>
+        <div class="ob-options">
+          <label class="ob-option"><input type="radio" name="q1" value="0"> <span class="ob-option-label">Rarely — less than once a month</span></label>
+          <label class="ob-option"><input type="radio" name="q1" value="10"><span class="ob-option-label">Sometimes — 1–3 times a month</span></label>
+          <label class="ob-option"><input type="radio" name="q1" value="20"><span class="ob-option-label">Often — at least once a week</span></label>
+          <label class="ob-option"><input type="radio" name="q1" value="30"><span class="ob-option-label">Almost always — needs daily reminders</span></label>
+        </div>
+      </div>
+
+      <!-- Q2 -->
+      <div class="ob-question">
+        <div class="ob-q-label">Q2 &nbsp;Does the patient have a diagnosed memory condition?</div>
+        <div class="ob-options">
+          <label class="ob-option"><input type="radio" name="q2" value="0"> <span class="ob-option-label">No — general age-related forgetfulness</span></label>
+          <label class="ob-option"><input type="radio" name="q2" value="12"><span class="ob-option-label">Mild or suspected (MCI, early symptoms)</span></label>
+          <label class="ob-option"><input type="radio" name="q2" value="25"><span class="ob-option-label">Diagnosed — Alzheimer's, dementia, or similar</span></label>
+        </div>
+      </div>
+
+      <!-- Q3 -->
+      <div class="ob-question">
+        <div class="ob-q-label">Q3 &nbsp;What time of day is the patient most forgetful?</div>
+        <div class="ob-options">
+          <label class="ob-option"><input type="radio" name="q3" value="morning">  <span class="ob-option-label">Morning</span></label>
+          <label class="ob-option"><input type="radio" name="q3" value="afternoon"><span class="ob-option-label">Afternoon</span></label>
+          <label class="ob-option"><input type="radio" name="q3" value="evening">  <span class="ob-option-label">Evening</span></label>
+          <label class="ob-option"><input type="radio" name="q3" value="none">     <span class="ob-option-label">No particular pattern</span></label>
+        </div>
+      </div>
+
+      <!-- Q4 -->
+      <div class="ob-question">
+        <div class="ob-q-label">Q4 &nbsp;Does the patient live alone?</div>
+        <div class="ob-options">
+          <label class="ob-option"><input type="radio" name="q4" value="15"><span class="ob-option-label">Yes — no one present to remind them</span></label>
+          <label class="ob-option"><input type="radio" name="q4" value="0"> <span class="ob-option-label">No — family or carer is present at home</span></label>
+        </div>
+      </div>
+
+      <!-- Q5 -->
+      <div class="ob-question">
+        <div class="ob-q-label">Q5 &nbsp;How many doses were missed in the past month (roughly)?</div>
+        <div class="ob-options">
+          <label class="ob-option"><input type="radio" name="q5" value="0"> <span class="ob-option-label">0 — perfect record</span></label>
+          <label class="ob-option"><input type="radio" name="q5" value="5"> <span class="ob-option-label">1–2 times</span></label>
+          <label class="ob-option"><input type="radio" name="q5" value="12"><span class="ob-option-label">3–5 times</span></label>
+          <label class="ob-option"><input type="radio" name="q5" value="20"><span class="ob-option-label">More than 5 times</span></label>
+        </div>
+      </div>
+
+      <div class="ob-callout">
+        <strong>🤖 How this helps:</strong> Your answers compute an initial risk score (0–100)
+        stored privately in Firebase. Once the dispenser has logged 20+ real doses the
+        machine-learning model takes over automatically.
+      </div>
+      <div class="ob-err" id="ob-err-3"></div>
+      <div class="ob-nav">
+        <button class="btn btn-secondary" onclick="obPrev(3)">← Back</button>
+        <button class="btn btn-primary"   onclick="saveProfile()" id="ob-save-btn">✓ Save & Start</button>
+      </div>
+    </div>
+
+  </div><!-- /onboarding-modal -->
+</div><!-- /onboarding-overlay -->
+
+<div id="toast"></div>
+
+<!-- ═══════════════════════════════════════
+  FIREBASE MODULE INIT
+═══════════════════════════════════════ -->
+<script type="module">
+  import { initializeApp }         from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+  import { getDatabase, ref, set, update, push, onValue, remove, runTransaction }
+                                   from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
+  import { getAuth, signInAnonymously, onAuthStateChanged }
+                                   from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyCh43fOs6dyvfmQmFBzdYtSzd8IZDTpx_Y",
+    authDomain: "pill-confirm.firebaseapp.com",
+    databaseURL: "https://pill-confirm-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "pill-confirm",
+    storageBucket: "pill-confirm.firebasestorage.app",
+    messagingSenderId: "710978315819",
+    appId: "1:710978315819:web:b85344493f795600f56c6e",
+    measurementId: "G-C63JVXBK7X"
+  };
+
+  const app  = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const note = document.getElementById('firebase-note');
+
+  window.db       = getDatabase(app);
+  window.dbRef    = ref;
+  window.dbSet    = set;
+  window.dbUpdate = update;
+  window.dbPush   = push;
+  window.dbRemove = remove;
+  window.dbTxn    = runTransaction;
+
+  window.dbOnValue = (r, cb, err) => onValue(r, cb, err || ((e) => {
+    console.error('Firebase read error:', e.message);
+    note.textContent = 'Read error: ' + e.message;
+  }));
+
+  note.textContent = 'Signing in…';
+  onAuthStateChanged(auth, (user) => {
+    if (!user) return;
+    note.textContent = 'Signed in — syncing… (uid: ' + user.uid.slice(0, 8) + ')';
+    if (typeof window.startFirebaseListener === 'function') window.startFirebaseListener();
+  });
+  signInAnonymously(auth).catch((e) => {
+    console.error('Anonymous sign-in failed:', e.code, e.message);
+    note.textContent = 'Sign-in failed: ' + e.code + ' — ' + e.message;
+  });
+</script>
+
+<!-- ═══════════════════════════════════════
+  APP LOGIC
+═══════════════════════════════════════ -->
+<script>
+/* ─────────────────────────────────────────────
+   STATE
+───────────────────────────────────────────── */
+let doseCount      = 1;
+let latestSchedule = null, latestHistory = null, latestLog = null;
+let predictionRunId = 0;
+let caregiverEmail  = '';
+let cg1Name = '', cg2Name = '', cg2Email = '';
+let patientProfile  = null;           // loaded from Firebase device/settings
+let alertsReady     = false;          // first history snapshot processed
+const alertTried    = new Set();      // history keys this tab already tried to e-mail about
+let listenersStarted = false;
+let formSynced      = false;
+let lastDeviceTime  = null, lastDeviceChange = 0;
+let currentState    = 'IDLE';
+let latestStatus    = null, latestVoice = null;
+let serverOffset    = 0;              // Firebase server clock minus this computer's clock (ms)
+let pendingCmd      = null;           // { id, cmd } waiting for the device to report back
+const ONLINE_MAX_AGE_MS   = 35000;    // device pushes status every 10 s
+const ALERT_CATCHUP_MS    = 12 * 3600 * 1000;   // e-mail misses up to 12 h old that nobody e-mailed yet
+
+/* ─────────────────────────────────────────────
+   HELPERS
+───────────────────────────────────────────── */
+const normStatus = (s) => String(s || 'dispensed').trim().toLowerCase();
+const isTest     = (e) => !!(e && e.test);
+const tsMs  = (t) => { t = Number(t) || 0; return t && t < 1e12 ? t * 1000 : t; };
+const esc   = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $     = (id) => document.getElementById(id);
+const fmtDate = (ts) => {
+  if (!ts) return '—';
+  const d = new Date(tsMs(ts));
+  return d.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'2-digit' });
+};
+const fmtTime = (ts, fallback) => {
+  if (!ts) return fallback || '—';
+  const d = new Date(tsMs(ts));
+  return d.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', hour12:true });
+};
+const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+/** "20:30" or "20:30:15" -> "8:30 PM" / "8:30:15 PM"; anything else is returned unchanged. */
+const to12 = (s, pad) => {
+  const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(String(s ?? '').trim());
+  if (!m) return s ?? '';
+  const H = +m[1], h = H % 12 || 12;
+  return `${pad ? String(h).padStart(2,'0') : h}:${m[2]}${m[3] ? ':' + m[3] : ''} ${H < 12 ? 'AM' : 'PM'}`;
+};
+
+/* ─────────────────────────────────────────────
+   EmailJS
+───────────────────────────────────────────── */
+const EMAILJS_SERVICE_ID  = 'service_w1bjrnt';
+const EMAILJS_TEMPLATE_ID = 'template_afeeira';
+const EMAILJS_PUBLIC_KEY  = '3Vp3z3bEnLKelKRWe';
+if (typeof emailjs !== 'undefined' && EMAILJS_PUBLIC_KEY !== 'YOUR_PUBLIC_KEY')
+  emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PREALERT_MAX_AGE_MS = 15 * 60 * 1000;   // a heads-up is useless once the dose time has passed
+
+/** Everyone who should hear about this patient: both caregivers and (if given) the patient. */
+function notifyRecipients() {
+  const p = patientProfile || {};
+  const list = [
+    { email: caregiverEmail || p.cg1Email, name: cg1Name || p.cg1Name || 'Caregiver', role: 'caregiver' },
+    { email: cg2Email || p.cg2Email,       name: cg2Name || p.cg2Name || 'Caregiver', role: 'caregiver' },
+    { email: p.patientEmail,               name: p.patientName || 'there',             role: 'patient' }
+  ].filter(r => r.email && EMAIL_RE.test(r.email));
+  const seen = new Set();                            // same address twice -> one e-mail
+  return list.filter(r => !seen.has(r.email.toLowerCase()) && seen.add(r.email.toLowerCase()));
+}
+
+/** kind: 'missed' (dose not taken) or 'prealert' (HIGH predicted risk, dose in ~10 min). */
+async function sendNotice(kind, entry) {
+  const recipients = notifyRecipients();
+  if (!recipients.length) { console.log('[alert] No e-mail address configured'); return 0; }
+  if (EMAILJS_PUBLIC_KEY === 'YOUR_PUBLIC_KEY') { console.log('[alert] EmailJS not configured'); return 0; }
+
+  const patientName = (patientProfile && patientProfile.patientName) || 'the patient';
+  const med      = entry.med || 'medicine';
+  const doseTime = to12(entry.sched || entry.time || '--:--');
+  const prefix   = isTest(entry) ? '[TEST] ' : '';
+  const riskPct  = ($('risk-badge') && $('risk-badge').textContent === 'HIGH') ? ` (${$('risk-pct').textContent})` : '';
+  let sentCount = 0;
+  for (const r of recipients) {
+    const you = r.role === 'patient';
+    let subject, message;
+    if (kind === 'prealert') {
+      subject = `${prefix}Reminder: ${med} due at ${doseTime}`;
+      message = you
+        ? `${prefix}Hi ${r.name}, your ${med} is due at ${doseTime} (in about 10 minutes). MedSync thinks this dose is easy to forget today, so please be near your dispenser and press Button 1 when it rings.`
+        : `${prefix}Hi ${r.name}, ${patientName}'s ${doseTime} dose of ${med} is due in about 10 minutes and MedSync predicts a HIGH chance it will be missed${riskPct}. Please check in with ${patientName} around the dose time.`;
+    } else {
+      subject = `${prefix}Missed dose: ${med} at ${doseTime}`;
+      message = you
+        ? `${prefix}Hi ${r.name}, your ${doseTime} dose of ${med} was not confirmed as taken. If you have not taken it, please follow your doctor's advice about a missed dose. Your caregiver has also been informed.`
+        : `${prefix}Hi ${r.name}, the ${doseTime} dose of ${med} for ${patientName} was not confirmed as taken (noted at ${to12(entry.time) || '--:--'}).`;
+    }
+    try {
+      await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+        to_email: r.email, to_name: r.name, patient: patientName,
+        medicine: med, dose_time: doseTime, subject, message
+      });
+      sentCount++;
+    } catch (e) { console.error('[alert] Email failed:', e); }
+  }
+  const what = kind === 'prealert' ? 'High-risk reminder' : 'Missed-dose alert';
+  if (sentCount > 0) showToast(`${what} e-mailed to ${sentCount} person(s)`, 'success');
+  else showToast(`${what} e-mail FAILED — see console`, 'error');
+  return sentCount;
+}
+
+/* Exactly-once e-mail: every open dashboard sees the same row, but only the tab that
+   wins this Firebase transaction on device/alerts/<key> sends the e-mail. */
+async function claimAndAlert(key, kind, entry) {
+  if (alertTried.has(key)) return;
+  alertTried.add(key);
+  const aRef = window.dbRef(window.db, 'device/alerts/' + key);
+  try {
+    const res = await window.dbTxn(aRef, (cur) => (cur ? undefined : { claimedAt: Date.now() }));
+    if (!res.committed) return;                       // another tab/device already handled it
+    const sent = await sendNotice(kind, entry);
+    await window.dbUpdate(aRef, { sent: sent || 0, sentAt: Date.now() });
+  } catch (e) { console.error('[alert] claim failed:', e); }
+}
+
+function processAlerts(data) {
+  if (!data) return;
+  const now = Date.now() + serverOffset;
+  Object.keys(data).forEach((k) => {
+    const e = data[k];
+    const kind = normStatus(e.status);
+    if (kind !== 'missed' && kind !== 'prealert') return;
+    const age = now - tsMs(e.timestamp);
+    const fresh = e.doseId && tsMs(e.timestamp) && age > -600000;
+    // Missed: catch up misses up to 12 h old that nobody e-mailed (v4 rows only; older rows
+    // had shifted timestamps). Heads-up: only while the dose is still ahead (15 min).
+    const ok = kind === 'prealert' ? fresh && age < PREALERT_MAX_AGE_MS
+                                   : (alertsReady || (fresh && age < ALERT_CATCHUP_MS));
+    if (!ok) { alertTried.add(k); return; }
+    claimAndAlert(k, kind, e);
+  });
+  alertsReady = true;
+}
+
+function recentPrealert() {
+  if (!latestHistory) return null;
+  const now = Date.now() + serverOffset;
+  return Object.values(latestHistory).find(e => normStatus(e.status) === 'prealert' &&
+           now - tsMs(e.timestamp) < PREALERT_MAX_AGE_MS && now - tsMs(e.timestamp) > -600000) || null;
+}
+
+/* ─────────────────────────────────────────────
+   CLOCK & GREETING
+───────────────────────────────────────────── */
+function updateClock() {
+  const n = new Date();
+  $('clock-display').textContent = to12(
+    [n.getHours(), n.getMinutes(), n.getSeconds()].map(x => String(x).padStart(2,'0')).join(':'), true);
+}
+setInterval(updateClock, 1000); updateClock();
+
+function setGreeting() {
+  const h    = new Date().getHours();
+  const tod  = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+  const name = cg1Name || (patientProfile && patientProfile.cg1Name) || '';
+  $('greeting-text').textContent = name ? `${tod}, ${name} 👋` : '';
+}
+
+/* ─────────────────────────────────────────────
+   DEVICE OFFLINE WATCHDOG
+───────────────────────────────────────────── */
+function deviceOnline() {
+  if (!latestStatus) return false;
+  if (typeof latestStatus.lastSeen === 'number')                // firmware v4: server-time heartbeat
+    return (Date.now() + serverOffset) - latestStatus.lastSeen < ONLINE_MAX_AGE_MS;
+  return !!lastDeviceChange && Date.now() - lastDeviceChange < 90000;   // older firmware
+}
+
+function renderOnline() {
+  const b = $('state-badge');
+  if (!deviceOnline()) {
+    if (b.textContent !== 'OFFLINE') { b.textContent = 'OFFLINE'; b.className = 'state-badge OFFLINE'; }
+  } else if (latestStatus) {
+    const st = String(latestStatus.state || 'UNKNOWN').toUpperCase();
+    if (b.textContent !== st) { b.textContent = st; b.className = 'state-badge ' + st; }
+  }
+  renderDeviceHealth();
+  renderSyncStatus();
+}
+setInterval(renderOnline, 5000);
+
+function renderDeviceHealth() {
+  const el = $('device-health');
+  const s = latestStatus;
+  if (!s) { el.textContent = 'Waiting for the dispenser…'; return; }
+  const parts = [];
+  if (typeof s.lastSeen === 'number') {
+    const age = Math.max(0, Math.round(((Date.now() + serverOffset) - s.lastSeen) / 1000));
+    parts.push(deviceOnline() ? `online · seen ${age}s ago` : `offline · last seen ${age < 120 ? age + 's' : Math.round(age / 60) + ' min'} ago`);
+  }
+  if (s.fw) parts.push('fw ' + s.fw);
+  if (s.outboxPending) parts.push(`${s.outboxPending} event(s) uploading`);
+  if (s.rtcOk === false) parts.push('⚠ RTC missing');
+  if (s.lcdOk === false) parts.push('⚠ LCD missing');
+  if (s.clockOk === false) parts.push('⚠ clock not set');
+  if (s.resetReason === 'brownout') parts.push('⚠ last restart: power too weak');
+  else if (s.resetReason === 'watchdog' || s.resetReason === 'crash') parts.push('⚠ last restart: ' + s.resetReason);
+  el.textContent = parts.join(' · ') || 'online';
+}
+
+function renderSyncStatus() {
+  const el = $('sync-status');
+  const sc = latestSchedule, s = latestStatus;
+  if (!sc) { el.textContent = ''; return; }
+  if (!s) { el.textContent = '⏳ Waiting for the dispenser to report…'; return; }
+  const same = s.scheduleValid && s.scheduleHour === sc.hour && s.scheduleMinute === sc.minute &&
+               s.doseCount === (sc.doseCount || 1);
+  let txt = same ? '✓ Dispenser is running this schedule'
+          : deviceOnline() ? '⏳ Sending to the dispenser… (up to ~15 s)'
+          : '⏳ Dispenser offline — it will pick this up when it reconnects';
+  if (latestVoice && latestVoice.mode && s.voiceMode && s.voiceMode !== latestVoice.mode)
+    txt += ' · voice change pending';
+  el.textContent = txt;
+  el.style.color = same ? 'var(--accent)' : 'var(--warn)';
+}
+
+/* ─────────────────────────────────────────────
+   DOSE STEPPER
+───────────────────────────────────────────── */
+function adjustDose(d) {
+  doseCount = Math.max(1, Math.min(10, doseCount + d));
+  $('dose-display').textContent = doseCount;
+}
+
+/* ─────────────────────────────────────────────
+   SEND SCHEDULE
+───────────────────────────────────────────── */
+async function sendSchedule() {
+  const timeVal = $('dispense-time').value;
+  if (!timeVal) return showToast('Please set a dispensing time', 'error');
+  const [hour, minute] = timeVal.split(':').map(Number);
+  try {
+    const med = $('med-name').value.trim() || 'Medicine';
+    await window.dbSet(window.dbRef(window.db, 'device/schedule'),
+      { hour, minute, doseCount, med, timestamp: Date.now() });
+    showToast(`Schedule saved: ${to12(timeVal)} × ${doseCount} capsule(s)`, 'success');
+    renderSyncStatus();
+  } catch (e) { showToast('Failed to save: ' + e.message, 'error'); }
+}
+
+function syncFormFromSchedule(s) {
+  if (formSynced || !s) return;
+  formSynced = true;
+  $('dispense-time').value =
+    String(s.hour).padStart(2,'0') + ':' + String(s.minute).padStart(2,'0');
+  doseCount = s.doseCount || 1;
+  $('dose-display').textContent = doseCount;
+  if (s.med && s.med !== 'Medicine') $('med-name').value = s.med;
+}
+
+/* ─────────────────────────────────────────────
+   APPLY FIREBASE DATA
+───────────────────────────────────────────── */
+function renderBanner() {
+  const st = latestStatus ? String(latestStatus.state || '').toUpperCase() : '';
+  const banner = $('alert-banner');
+  const pre = recentPrealert();
+  if (st === 'ALERT') {
+    banner.className = 'alert-banner show alert-warn';
+    $('alert-icon').textContent = '⚠️';
+    $('alert-banner-text').textContent = 'Dose time reached — awaiting dispense confirmation from the device.';
+  } else if (st === 'MISSED') {
+    banner.className = 'alert-banner show alert-danger';
+    $('alert-icon').textContent = '🚨';
+    $('alert-banner-text').textContent = 'Dose was not confirmed — missed! Caregivers and patient notified.';
+  } else if (pre && st !== 'CONFIRMED' && st !== 'DISPENSING') {
+    banner.className = 'alert-banner show alert-warn';
+    $('alert-icon').textContent = '🔔';
+    $('alert-banner-text').textContent = `High chance of missing the ${to12(pre.sched || '')} dose — the patient was reminded on the device and everyone was e-mailed.`;
+  } else {
+    banner.className = 'alert-banner';
+    banner.classList.remove('show');
+  }
+}
+
+function applyStatus(data) {
+  if (data.time !== lastDeviceTime) { lastDeviceTime = data.time; lastDeviceChange = Date.now(); }
+  latestStatus = data;
+
+  const st = String(data.state || 'UNKNOWN').toUpperCase();
+  currentState = st;
+  renderOnline();                               // state badge, or OFFLINE if the heartbeat is old
+  $('device-time').textContent = to12(data.time || '--:--:--');
+
+  if (pendingCmd && data.lastCmdId === pendingCmd.id) {
+    const r = data.lastCmdResult || 'done';
+    const msg = { started:'Dispenser started a test alert', done:'Dispenser counters reset',
+                  busy:'Dispenser is busy with a dose — try again after it', stale:'Command arrived too late — try again' }[r] || ('Dispenser replied: ' + r);
+    $('cmd-status').textContent = '✓ ' + msg;
+    showToast(msg, (r === 'started' || r === 'done') ? 'success' : 'error');
+    pendingCmd = null;
+  }
+
+  // Status panel alert glow
+  const sp = $('status-panel');
+  sp.classList.remove('state-alert','state-missed');
+  if (st === 'ALERT')  sp.classList.add('state-alert');
+  if (st === 'MISSED') sp.classList.add('state-missed');
+
+  renderBanner();
+
+  if (data.scheduleValid) {
+    const h = String(data.scheduleHour).padStart(2,'0');
+    const m = String(data.scheduleMinute).padStart(2,'0');
+    $('active-time').textContent = to12(`${h}:${m}`);
+    $('active-dose').textContent = data.doseCount;
+    updateLCDPreview(`Time:${to12(data.time || '--:--:--', true)}`, `Dose:${to12(`${h}:${m}`, true).replace(' ', '')} x${data.doseCount}`);
+  } else {
+    updateLCDPreview(`Time:${to12(data.time || '--:--:--', true)}`, 'No schedule set');
+  }
+}
+
+// Single source of truth: the history rows (test alerts excluded). The device's own
+// counters (device/log) are only shown in the developer panel data, never mixed in.
+function recomputeStats() {
+  // Same rule as the earlier dashboard: every recorded dose (confirmed or missed) counts
+  // as dispensed; the device's own counter is used if it is higher. Test alerts excluded.
+  const rows = (latestHistory ? Object.values(latestHistory) : []).filter(e => !isTest(e));
+  const logD = (latestLog && latestLog.totalDispensed) || 0;
+  let c, m;
+  if (rows.length) {
+    c = rows.filter(e => normStatus(e.status) === 'confirmed').length;
+    m = rows.filter(e => normStatus(e.status) === 'missed').length;
+  } else {
+    c = (latestLog && latestLog.totalConfirmed) || 0;
+    m = (latestLog && latestLog.totalMissed)    || 0;
+  }
+  const d = Math.max(c + m, logD);
+  $('stat-dispensed').textContent = d;
+  $('stat-confirmed').textContent = c;
+  $('stat-missed').textContent    = m;
+
+  // Glow missed card if > 0
+  const missCard = document.querySelector('.stat-card.missed');
+  missCard.classList.toggle('has-misses', m > 0);
+
+  const done = c + m;
+  const pct  = done ? Math.round((c / done) * 100) : null;
+  $('compliance-pct').textContent   = pct === null ? '— %' : pct + '%';
+  $('compliance-bar').style.width   = (pct || 0) + '%';
+}
+
+function applyLog(data) { latestLog = data; recomputeStats(); }
+
+function applyHistory(data) {
+  latestHistory = data;
+  const tbody = $('log-tbody');
+  tbody.innerHTML = '';
+
+  const all     = data ? Object.entries(data).filter(([, e]) => normStatus(e.status) !== 'prealert') : [];
+  const filt    = $('log-filter') ? $('log-filter').value : 'all';
+  const visible = filt === 'all' ? all : all.filter(([, e]) => normStatus(e.status) === filt);
+  $('log-count').textContent = filt === 'all' ? `${all.length} entries`
+                                              : `${visible.length} of ${all.length} entries (${filt})`;
+  if (!visible.length) {
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state">
+      <div class="es-icon">💊</div>
+      <div class="es-text">${all.length ? 'No ' + esc(filt) + ' entries.' : 'No activity yet — waiting for the first dose.'}</div>
+    </div></td></tr>`;
+    render7DayChart(all.length ? data : null);
+    return;
+  }
+
+  const sorted = visible
+    .sort(([ka, a], [kb, b]) =>
+      (tsMs(b.timestamp) - tsMs(a.timestamp)) || (kb > ka ? 1 : -1));   // every row, newest first
+
+  const frag = document.createDocumentFragment();
+  sorted.forEach(([, entry], i) => {
+    const status = normStatus(entry.status);
+    const cls    = status === 'missed' ? 'missed' : status === 'confirmed' ? 'confirmed' : 'dispensed';
+    const tr     = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${i + 1}</td>
+      <td>${esc(fmtDate(entry.timestamp))}</td>
+      <td>${esc(to12(entry.time) || fmtTime(entry.timestamp, '--:--'))}</td>
+      <td>${esc(entry.med  || 'Unspecified')}</td>
+      <td>${esc(entry.dose ?? '-')}</td>
+      <td><span class="log-badge ${cls}">${esc(status.charAt(0).toUpperCase() + status.slice(1))}</span>${isTest(entry) ? ' <span class="small">(test)</span>' : ''}</td>`;
+    frag.appendChild(tr);
+  });
+  tbody.appendChild(frag);
+
+  render7DayChart(data);
+}
+
+/* ─────────────────────────────────────────────
+   7-DAY CHART
+───────────────────────────────────────────── */
+function render7DayChart(historyData) {
+  const area = $('chart-area');
+  area.innerHTML = '';
+
+  // Build day buckets for the last 7 days
+  const buckets = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i); d.setHours(0,0,0,0);
+    buckets.push({ date: d, confirmed: 0, missed: 0, total: 0 });
+  }
+
+  if (historyData) {
+    Object.values(historyData).forEach(entry => {
+      if (isTest(entry)) return;
+      const ts = tsMs(entry.timestamp);
+      if (!ts) return;
+      const d  = new Date(ts); d.setHours(0,0,0,0);
+      const bk = buckets.find(b => b.date.getTime() === d.getTime());
+      if (!bk) return;
+      const st = normStatus(entry.status);
+      if (st === 'confirmed') { bk.confirmed++; bk.total++; }
+      else if (st === 'missed') { bk.missed++; bk.total++; }
+    });
+  }
+
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  buckets.forEach(bk => {
+    const isToday = bk.date.getTime() === today.getTime();
+    const hasMiss  = bk.missed > 0;
+    const hasData  = bk.total  > 0;
+    const pct      = hasData ? Math.round((bk.confirmed / bk.total) * 100) : 0;
+    const heightPx = hasData ? Math.max(4, pct * 0.76) : 0;
+
+    const dayEl = document.createElement('div');
+    dayEl.className = 'chart-day';
+
+    const fillClass = !hasData ? 'empty-day' : hasMiss ? 'missed-day' : '';
+    dayEl.innerHTML = `
+      <div class="chart-day-pct">${hasData ? pct + '%' : ''}</div>
+      <div class="chart-bar-wrap" title="${DAY_NAMES[bk.date.getDay()]}: ${bk.confirmed} confirmed, ${bk.missed} missed">
+        <div class="chart-bar-fill ${fillClass}" style="height:${heightPx}px"></div>
+      </div>
+      <div class="chart-day-label" style="color:${isToday ? 'var(--accent)' : 'var(--text-dim)'};font-weight:${isToday ? 700 : 400}">
+        ${isToday ? 'Today' : DAY_NAMES[bk.date.getDay()]}
+      </div>`;
+    area.appendChild(dayEl);
+  });
+}
+
+/* ─────────────────────────────────────────────
+   RISK PREDICTION  (ML + Heuristic)
+───────────────────────────────────────────── */
+const MIN_ML_SAMPLES = 20;
+const getOutcomes = (h) =>
+  (h ? Object.values(h) : []).filter(e =>
+    !isTest(e) && ['confirmed','missed'].includes(normStatus(e.status)));
+const levelOf = (pct) => pct < 30 ? 'LOW' : pct < 60 ? 'MEDIUM' : 'HIGH';
+
+function computeHeuristicRisk(historyData) {
+  const outcomes = getOutcomes(historyData);
+  // Use quiz baselineRisk as prior if available and sample is small
+  const baselinePrior = (patientProfile && patientProfile.forgetfulness && patientProfile.forgetfulness.baselineRisk) || 20;
+  const PRIOR_MEAN   = baselinePrior / 100;
+  const PRIOR_WEIGHT = outcomes.length < 5 ? 5 : 3;  // stronger prior when little data
+
+  const nowDow  = new Date().getDay();
+  const sameDay = outcomes.filter(e => new Date(tsMs(e.timestamp)).getDay() === nowDow);
+  const pool    = sameDay.length >= 3 ? sameDay : outcomes;
+  const missed  = pool.filter(e => normStatus(e.status) === 'missed').length;
+  let risk      = (missed + PRIOR_MEAN * PRIOR_WEIGHT) / (pool.length + PRIOR_WEIGHT);
+
+  const recent = outcomes.slice().sort((a,b) => tsMs(b.timestamp)-tsMs(a.timestamp)).slice(0,2);
+  if (recent.length === 2 && recent.every(e => normStatus(e.status) === 'missed'))
+    risk = Math.min(0.95, risk + 0.15);
+
+  const pct = Math.round(risk * 100);
+  return { riskScore:pct, riskLevel:levelOf(pct), sampleSize:outcomes.length, method:'heuristic', computedAt:Date.now() };
+}
+
+function buildFeatureRow(dow, hour, rate, streak) {
+  const ha = (hour/24)*2*Math.PI, da = (dow/7)*2*Math.PI;
+  return [Math.sin(ha),Math.cos(ha),Math.sin(da),Math.cos(da),rate,Math.min(streak,5)/5];
+}
+
+async function trainAndPredictML(sorted) {
+  const xsArr=[],ysArr=[];
+  let missedSoFar=0,totalSoFar=0,streak=0;
+  sorted.forEach(e => {
+    const d = new Date(tsMs(e.timestamp));
+    xsArr.push(buildFeatureRow(d.getDay(),d.getHours()+d.getMinutes()/60,(missedSoFar+.5)/(totalSoFar+1),streak));
+    const label = normStatus(e.status)==='missed'?1:0;
+    ysArr.push(label); totalSoFar++;
+    if (label){missedSoFar++;streak++;}else streak=0;
+  });
+  const xs=tf.tensor2d(xsArr), ys=tf.tensor2d(ysArr,[ysArr.length,1]);
+  const model=tf.sequential();
+  model.add(tf.layers.dense({units:1,inputShape:[6],activation:'sigmoid'}));
+  model.compile({optimizer:tf.train.adam(0.05),loss:'binaryCrossentropy'});
+  let pred,res;
+  try {
+    await model.fit(xs,ys,{epochs:60,batchSize:Math.min(8,xsArr.length),verbose:0});
+    const now=new Date();
+    const nextHour=latestSchedule?latestSchedule.hour+(latestSchedule.minute||0)/60:now.getHours();
+    pred=tf.tensor2d([buildFeatureRow(now.getDay(),nextHour,(missedSoFar+.5)/(totalSoFar+1),streak)]);
+    res=model.predict(pred);
+    return (await res.data())[0];
+  } finally {
+    xs.dispose();ys.dispose();model.dispose();
+    if(pred)pred.dispose();if(res)res.dispose();
+  }
+}
+
+async function getRiskPrediction(historyData) {
+  const outcomes = getOutcomes(historyData);
+  if (outcomes.length >= MIN_ML_SAMPLES && typeof tf !== 'undefined') {
+    try {
+      const sorted = outcomes.slice().sort((a,b)=>tsMs(a.timestamp)-tsMs(b.timestamp));
+      const pct    = Math.round((await trainAndPredictML(sorted))*100);
+      return {riskScore:pct,riskLevel:levelOf(pct),sampleSize:outcomes.length,method:'ml',computedAt:Date.now()};
+    } catch(e){ console.error('ML failed, using heuristic:', e); }
+  }
+  return computeHeuristicRisk(historyData);
+}
+
+function renderRiskPrediction(p) {
+  $('risk-pct').textContent = p.riskScore + '%';
+  $('risk-bar').style.width = p.riskScore + '%';
+  const badge = $('risk-badge');
+  badge.textContent = p.riskLevel;
+  const colors = {
+    LOW:    ['rgba(0,229,176,.15)','var(--accent)'],
+    MEDIUM: ['rgba(255,214,0,.15)','var(--warn)'],
+    HIGH:   ['rgba(255,61,90,.15)','var(--danger)']
+  };
+  const [bg,fg] = colors[p.riskLevel] || colors.LOW;
+  badge.style.background = bg; badge.style.color = fg;
+  $('risk-sample').textContent = p.method === 'ml'
+    ? `ML model — trained on ${p.sampleSize} doses`
+    : p.sampleSize < 5
+      ? `Questionnaire baseline · ${p.sampleSize} real dose(s) logged so far`
+      : `Statistical estimate — ${p.sampleSize} dose(s) (${Math.max(0,MIN_ML_SAMPLES-p.sampleSize)} more to unlock ML)`;
+}
+
+async function updateRiskPrediction() {
+  const myRun = ++predictionRunId;
+  let pred;
+  if (!latestHistory || !Object.keys(latestHistory).length) {
+    pred = computeHeuristicRisk(null);  // uses quiz baseline if available
+  } else {
+    pred = await getRiskPrediction(latestHistory);
+  }
+  if (myRun !== predictionRunId) return;
+  renderRiskPrediction(pred);
+  try { await window.dbSet(window.dbRef(window.db,'device/prediction'),pred); }
+  catch(e){ console.error('Failed to write prediction:', e); }
+}
+
+/* ─────────────────────────────────────────────
+   UI UTILITIES
+───────────────────────────────────────────── */
+function updateLCDPreview(l1, l2) {
+  $('lcd-l1').textContent = l1.padEnd(16).substring(0,16);
+  $('lcd-l2').textContent = l2.padEnd(16).substring(0,16);
+}
+function setConnected(on) {
+  $('conn-dot').classList.toggle('online', on);
+  $('conn-text').textContent = on ? 'Cloud connected' : 'Cloud disconnected';
+}
+let toastTimer;
+function showToast(msg, type='success') {
+  const el = $('toast');
+  el.textContent = msg; el.className = `show ${type}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+}
+function toggleDev() {
+  const toggle = $('dev-toggle'), body = $('dev-body');
+  toggle.classList.toggle('open'); body.classList.toggle('open');
+}
+
+/* ─────────────────────────────────────────────
+   PATIENT HEADER CHIP
+───────────────────────────────────────────── */
+function applyProfileToUI(profile) {
+  if (!profile || !profile.patientName) return;
+  patientProfile = profile;
+  cg1Name        = profile.cg1Name  || '';
+  cg2Name        = profile.cg2Name  || '';
+  cg2Email       = profile.cg2Email || '';
+  caregiverEmail = profile.cg1Email || profile.caregiverEmail || caregiverEmail;
+
+  // Header chip
+  $('pc-name').textContent = profile.patientName;
+  $('pc-age').textContent  = profile.patientAge ? `· ${profile.patientAge} yrs` : '';
+  $('patient-chip').style.display = 'flex';
+
+  // Edit profile button
+  $('edit-profile-btn').style.display = 'flex';
+
+  // Caregiver email field
+  $('caregiver-email').value = caregiverEmail;
+  $('caregiver-status').textContent = caregiverEmail
+    ? `Alerts active for ${caregiverEmail}` : 'No caregiver email set';
+
+  // Greeting
+  setGreeting();
+  // Refresh risk with quiz data
+  updateRiskPrediction();
+}
+
+/* ─────────────────────────────────────────────
+   FIREBASE LISTENERS
+───────────────────────────────────────────── */
+function startFirebaseListener() {
+  if (listenersStarted) return;
+  listenersStarted = true;
+  const R  = (p) => window.dbRef(window.db, p);
+  const on = window.dbOnValue;
+
+  on(R('.info/connected'), (s) => {
+    const connected = s.val() === true;
+    setConnected(connected);
+    $('firebase-note').textContent = connected
+      ? 'Connected to Firebase'
+      : 'Reconnecting to Firebase…';
+  });
+
+  on(R('device/status'),   (s) => { const d=s.val(); if(d) applyStatus(d); });
+  on(R('device/log'),      (s) => applyLog(s.val() || null));
+
+  on(R('.info/serverTimeOffset'), (s) => { serverOffset = Number(s.val()) || 0; renderOnline(); });
+
+  on(R('device/schedule'), (s) => {
+    latestSchedule = s.val();
+    syncFormFromSchedule(latestSchedule);
+    renderSyncStatus();
+    updateRiskPrediction();
+  });
+
+  on(R('device/history'), (s) => {
+    const data = s.val();
+    applyHistory(data);
+    recomputeStats();
+    updateRiskPrediction();
+    renderBanner();
+    processAlerts(data);                     // exactly-once e-mails (missed + high-risk heads-up)
+  });
+
+  on(R('device/voice'), (s) => {
+    latestVoice = s.val();
+    if (latestVoice && latestVoice.mode && $('voice-lang')) $('voice-lang').value = latestVoice.mode;
+    renderSyncStatus();
+  });
+
+  on(R('device/settings'), (s) => {
+    const d = s.val();
+    if (d && d.patientName) {
+      // Profile already saved — hide onboarding
+      hideOnboarding();
+      applyProfileToUI(d);
+    } else {
+      // No profile — show onboarding
+      showOnboarding(false);
+    }
+    // Legacy single email fallback
+    if (d && d.caregiverEmail && !caregiverEmail) {
+      caregiverEmail = d.caregiverEmail;
+      $('caregiver-email').value = caregiverEmail;
+    }
+  });
+}
+window.startFirebaseListener = startFirebaseListener;
+
+async function saveVoiceLang() {
+  const mode = $('voice-lang').value;           // 'en' | 'kn' | 'both'
+  try {
+    await window.dbUpdate(window.dbRef(window.db,'device/voice'), { mode });
+    $('voice-status').textContent = 'Saved. The dispenser applies it within about a minute.';
+    showToast('Voice language saved','success');
+  } catch(e){ showToast('Failed to save voice: '+e.message,'error'); }
+}
+
+async function saveCaregiverEmail() {
+  const val = $('caregiver-email').value.trim();
+  if (val === caregiverEmail) return;
+  if (val && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val))
+    return showToast('Invalid email address','error');
+  try {
+    // Write both fields: the profile listener reads cg1Email, so updating only the
+    // legacy caregiverEmail field made the old address come back immediately.
+    await window.dbUpdate(window.dbRef(window.db,'device/settings'),{ caregiverEmail:val, cg1Email:val });
+    caregiverEmail = val;
+    if (patientProfile) patientProfile.cg1Email = val;
+    $('caregiver-status').textContent = val ? `Alerts active for ${val}` : 'No caregiver email set';
+    showToast('Caregiver email saved','success');
+  } catch(e){ showToast('Failed to save: '+e.message,'error'); }
+}
+
+/* ─────────────────────────────────────────────
+   DEVICE COMMANDS (test alert / reset)
+───────────────────────────────────────────── */
+async function sendCommand(cmd) {
+  const id = String(Date.now());
+  try {
+    await window.dbSet(window.dbRef(window.db,'device/command'), { id, cmd, at: Date.now() });
+    pendingCmd = { id, cmd };
+    $('cmd-status').textContent = deviceOnline()
+      ? '⏳ Sent — the dispenser checks every 8 s…'
+      : '⚠ Dispenser looks offline — the command expires after 3 minutes';
+  } catch (e) { showToast('Could not send command: ' + e.message, 'error'); }
+}
+
+async function resetAllData() {
+  if (!confirm('Delete ALL dose history, prediction and alert records, and reset the dispenser counters?\n\nUse this once before starting a real trial. This cannot be undone.')) return;
+  try {
+    const R = (p) => window.dbRef(window.db, p);
+    await Promise.all([window.dbRemove(R('device/history')), window.dbRemove(R('device/prediction')),
+                       window.dbRemove(R('device/alerts')),  window.dbRemove(R('device/log'))]);
+    alertTried.clear();
+    await sendCommand('reset_counters');
+    showToast('History cleared — resetting dispenser counters…', 'success');
+  } catch (e) { showToast('Reset failed: ' + e.message, 'error'); }
+}
+
+/* ─────────────────────────────────────────────
+   ONBOARDING  — step navigation
+───────────────────────────────────────────── */
+let currentObStep = 1;
+
+function obSetStep(n) {
+  for (let i=1;i<=3;i++) {
+    const dot = $(`dot-${i}`);
+    dot.classList.remove('active','done');
+    if (i < n) dot.classList.add('done');
+    if (i === n) dot.classList.add('active');
+    const sc = $(`ob-step-${i}`);
+    sc.classList.toggle('active', i === n);
+  }
+  currentObStep = n;
+  // Update quiz subtitle with patient name
+  if (n === 3) {
+    const name = $('ob-patient-name').value.trim() || 'the patient';
+    $('ob-patient-name-display').textContent = name;
+  }
+}
+
+function obNext(from) {
+  $(`ob-err-${from}`).textContent = '';
+  if (from === 1) {
+    const name = $('ob-patient-name').value.trim();
+    const age  = parseInt($('ob-patient-age').value);
+    if (!name) return ($(`ob-err-1`).textContent = 'Patient name is required.');
+    if (!age || age < 1 || age > 120) return ($(`ob-err-1`).textContent = 'Please enter a valid age (1–120).');
+    const pe = $('ob-patient-email').value.trim();
+    if (pe && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(pe)) return ($(`ob-err-1`).textContent = 'Patient email format is invalid.');
+    obSetStep(2);
+  } else if (from === 2) {
+    const n1 = $('ob-cg1-name').value.trim();
+    const e1 = $('ob-cg1-email').value.trim();
+    const e2 = $('ob-cg2-email').value.trim();
+    if (!n1) return ($(`ob-err-2`).textContent = 'Primary caregiver name is required.');
+    if (!e1 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e1))
+      return ($(`ob-err-2`).textContent = 'A valid primary caregiver email is required.');
+    if (e2 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e2))
+      return ($(`ob-err-2`).textContent = 'Secondary email format is invalid.');
+    obSetStep(3);
+  }
+}
+
+function obPrev(from) {
+  obSetStep(from - 1);
+}
+
+/* ─────────────────────────────────────────────
+   ONBOARDING — FORGETFULNESS SCORE
+───────────────────────────────────────────── */
+function computeForgetfulnessBaseline() {
+  const q1 = parseInt(document.querySelector('input[name="q1"]:checked')?.value ?? 15);
+  const q2 = parseInt(document.querySelector('input[name="q2"]:checked')?.value ?? 12);
+  const q3 =          document.querySelector('input[name="q3"]:checked')?.value  ?? 'none';
+  const q4 = parseInt(document.querySelector('input[name="q4"]:checked')?.value ?? 7);
+  const q5 = parseInt(document.querySelector('input[name="q5"]:checked')?.value ?? 5);
+
+  // Q3: time-of-day vs scheduled dose time (bonus risk if they match)
+  let q3Score = 0;
+  const schedHour = latestSchedule ? latestSchedule.hour : parseInt(($('dispense-time').value || '08:00').split(':')[0]);
+  if ((q3 === 'morning'   && schedHour  < 12) ||
+      (q3 === 'afternoon' && schedHour >= 12 && schedHour < 17) ||
+      (q3 === 'evening'   && schedHour >= 17)) q3Score = 10;
+
+  const total = Math.min(100, q1 + q2 + q3Score + q4 + q5);
+  return { q1, q2, q3, q4, q5, q3Score, baselineRisk: total };
+}
+
+/* ─────────────────────────────────────────────
+   ONBOARDING — SAVE PROFILE
+───────────────────────────────────────────── */
+async function saveProfile() {
+  $('ob-err-3').textContent = '';
+
+  // Validate all quiz questions answered
+  const unanswered = ['q1','q2','q3','q4','q5'].filter(
+    n => !document.querySelector(`input[name="${n}"]:checked`)
+  );
+  if (unanswered.length) {
+    $('ob-err-3').textContent = `Please answer all questions (missing: ${unanswered.join(', ')}).`;
+    return;
+  }
+
+  const btn = $('ob-save-btn');
+  btn.textContent = 'Saving…'; btn.disabled = true;
+
+  const forgetfulness = computeForgetfulnessBaseline();
+  const profile = {
+    patientName:   $('ob-patient-name').value.trim(),
+    patientAge:    parseInt($('ob-patient-age').value),
+    patientEmail:  $('ob-patient-email').value.trim(),
+    cg1Name:       $('ob-cg1-name').value.trim(),
+    cg1Email:      $('ob-cg1-email').value.trim(),
+    cg2Name:       $('ob-cg2-name').value.trim(),
+    cg2Email:      $('ob-cg2-email').value.trim(),
+    caregiverEmail:$('ob-cg1-email').value.trim(),  // legacy compat
+    forgetfulness,
+    profileSavedAt: Date.now()
+  };
+
+  try {
+    await window.dbUpdate(window.dbRef(window.db,'device/settings'), profile);
+    hideOnboarding();
+    applyProfileToUI(profile);
+    showToast(`Profile saved for ${profile.patientName} 🎉`, 'success');
+  } catch(e) {
+    $('ob-err-3').textContent = 'Save failed: ' + e.message;
+    btn.textContent = '✓ Save & Start'; btn.disabled = false;
+  }
+}
+
+function showOnboarding(editMode) {
+  const overlay = $('onboarding-overlay');
+  overlay.style.display = 'flex';
+  if (editMode) {
+    $('ob-sub').textContent = 'Update the patient profile below.';
+    // Pre-fill if profile exists
+    if (patientProfile) {
+      $('ob-patient-name').value = patientProfile.patientName || '';
+      $('ob-patient-age').value  = patientProfile.patientAge  || '';
+      $('ob-patient-email').value = patientProfile.patientEmail || '';
+      $('ob-cg1-name').value     = patientProfile.cg1Name     || '';
+      $('ob-cg1-email').value    = patientProfile.cg1Email    || '';
+      $('ob-cg2-name').value     = patientProfile.cg2Name     || '';
+      $('ob-cg2-email').value    = patientProfile.cg2Email    || '';
+    }
+  } else {
+    $('ob-sub').textContent = "Let's set up the patient profile — takes under a minute.";
+  }
+  obSetStep(1);
+}
+
+function hideOnboarding() {
+  $('onboarding-overlay').style.display = 'none';
+}
+
+/* ─────────────────────────────────────────────
+   BOOT
+───────────────────────────────────────────── */
+// Show onboarding by default; will be hidden once Firebase confirms a saved profile
+// If Firebase is slow, onboarding stays visible until settings are read
+
+updateLCDPreview('MedSync v4.0', '  Initialising..');
+setTimeout(() => updateLCDPreview('Time: --:--:--  ', 'No schedule set '), 1500);
+render7DayChart(null);   // render empty chart immediately
+</script>
+</body>
+</html>

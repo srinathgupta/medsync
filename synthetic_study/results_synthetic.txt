@@ -1,0 +1,15 @@
+ALL RESULTS ARE ON SYNTHETIC DATA WITH PLANTED RULES - PATTERN RECOVERY, NOT REAL-WORLD ACCURACY
+
+POOLED
+                                   model  thr   AUC  PR_AUC  precision  recall    F1
+                 base rate (no features) 0.50 0.497   0.158      0.000   0.000 0.000
+                      Bayesian heuristic 0.18 0.589   0.264      0.210   0.410 0.277
+Logistic regression (dashboard features) 0.21 0.644   0.293      0.252   0.299 0.273
+  Oracle (knows hidden true_p) = ceiling 0.22 0.664   0.343      0.316   0.368 0.340
+
+SINGLE PATIENT
+                                   model  thr   AUC  PR_AUC  precision  recall    F1
+                 base rate (no features) 0.50 0.297   0.116      0.000     0.0 0.000
+                      Bayesian heuristic 0.12 0.335   0.121      0.136     0.6 0.222
+Logistic regression (dashboard features) 0.11 0.277   0.139      0.059     0.2 0.091
+  Oracle (knows hidden true_p) = ceiling 0.15 0.200   0.108      0.000     0.0 0.000
