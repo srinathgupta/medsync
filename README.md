@@ -20,6 +20,7 @@ Final-year project, Department of Electronics and Communication Engineering, SJC
 - **Notifications:** missed-dose e-mail and high-risk heads-up e-mail to both caregivers and the patient (EmailJS), sent exactly once per event.
 - **Miss-risk prediction:** a Bayesian estimate for small histories, and an in-browser logistic-regression model (TensorFlow.js) once 20 real doses are logged.
 - **Demo controls:** "Test alert now" and "Reset counters & history" buttons on the dashboard.
+- **Sign-in:** only approved accounts (listed in the database) can open the dashboard or talk to the dispenser.
 
 ## Architecture
 
@@ -48,6 +49,7 @@ flowchart LR
 | `device/command` | dashboard | `test_alert` or `reset_counters` |
 | `device/alerts/<key>` | dashboard | marks an e-mail as sent (prevents duplicates) |
 | `device/settings` | dashboard | patient and caregiver profile |
+| `access/<uid>` | owner (Firebase Console) | `true` for every approved account, including the dispenser |
 
 ## Hardware
 
@@ -82,9 +84,13 @@ FAT32 card with a folder named `mp3` containing the files from `sd_card/mp3/`:
 | 0010 / 0011 | English / Kannada: "your medicine is due in 10 minutes" (0010 is text-to-speech) |
 
 ### 3. Firebase
-1. Create a project with a **Realtime Database** and enable **Anonymous** sign-in (and optionally Email/Password for the device).
-2. Paste `firebase/database.rules.json` into *Realtime Database → Rules* and publish.
-3. Put your web config into the `firebaseConfig` block of `dashboard/index.html`.
+1. Create a project with a **Realtime Database**, and enable the **Email/Password** sign-in provider.
+2. *Authentication → Users → Add user*: one account for each caregiver who may use the dashboard, and one for the dispenser. Put the dispenser's email and password in `secrets.h` and flash it.
+3. *Realtime Database → Data*: add a node `access` and, inside it, one entry per approved account: key = the account's **User UID** (from the Users list), value = `true`.
+4. Paste `firebase/database.rules.json` into *Realtime Database → Rules* and publish. Only the accounts under `access` can now read or write.
+5. Put your web config into the `firebaseConfig` block of `dashboard/index.html`, and add your dashboard's domain under *Authentication → Settings → Authorized domains*.
+
+A person who signs in with an account that is not yet approved sees their account ID on the screen, so the owner can add it.
 
 ### 4. E-mail (EmailJS)
 Create a service and a template. In the template set **To Email** `{{to_email}}`, **Subject** `{{subject}}` and the body `{{message}}`. Put the service ID, template ID and public key into `dashboard/index.html`. In EmailJS, restrict sending to your dashboard's web address.
@@ -101,6 +107,6 @@ The dashboard predicts the chance that the next dose is missed. With fewer than 
 ## Limitations
 
 - E-mails are sent by an open dashboard tab (EmailJS runs in the browser). Server-side sending would need a paid Firebase plan (Cloud Functions).
-- Anonymous sign-in means anyone with the dashboard link can use it; the database rules validate the data but do not separate users.
+- All approved accounts see and control the same single dispenser; there are no per-user roles (one dispenser = one patient).
 - The dispensing mechanism is a prototype; capsule jams are not detected.
 - Real-use data so far comes from bench testing, not from patients.
