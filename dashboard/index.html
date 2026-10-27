@@ -412,6 +412,19 @@ input[type=time]::-webkit-calendar-picker-indicator { filter:invert(.7); cursor:
   background:linear-gradient(90deg, var(--accent2), var(--accent), var(--accent2));
   border-radius:20px 20px 0 0;
 }
+#login-overlay {
+  position:fixed; inset:0; z-index:10000;
+  background:rgba(5,7,12,.97); backdrop-filter:blur(8px);
+  display:flex; align-items:center; justify-content:center; padding:20px;
+}
+#login-modal {
+  background:var(--panel); border:1px solid var(--border-hi);
+  border-radius:20px; padding:32px 34px; width:100%; max-width:400px;
+  box-shadow:0 32px 80px rgba(0,0,0,.7), 0 0 0 1px rgba(0,229,176,.08);
+}
+#login-modal input { margin-top:6px }
+.login-link { background:none; border:none; color:var(--accent); font-family:var(--mono); font-size:12px; cursor:pointer; padding:0; margin-top:12px }
+.uid-box { font-family:var(--mono); font-size:12px; background:var(--bg); border:1px solid var(--border-hi); border-radius:var(--r); padding:10px 12px; word-break:break-all; margin:10px 0 }
 .ob-header { text-align:center; margin-bottom:28px }
 .ob-logo { font-size:32px; margin-bottom:8px }
 .ob-title { font-size:22px; font-weight:800; margin-bottom:4px }
@@ -534,6 +547,7 @@ input[type=time]::-webkit-calendar-picker-indicator { filter:invert(.7); cursor:
   </div>
   <div class="header-right">
     <button class="btn-ghost" id="edit-profile-btn" onclick="showOnboarding(true)">✏️ Edit Profile</button>
+    <button class="btn-ghost" id="signout-btn" onclick="doLogout()" style="display:none" title="Sign out">⎋ Sign out</button>
     <div class="status-pill">
       <div class="status-dot" id="conn-dot"></div>
       <span id="conn-text">Disconnected</span>
@@ -730,6 +744,36 @@ input[type=time]::-webkit-calendar-picker-indicator { filter:invert(.7); cursor:
 <!-- ═══════════════════════════════════════
   ONBOARDING OVERLAY
 ═══════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════
+  LOGIN (only approved accounts can use the dashboard)
+═══════════════════════════════════════ -->
+<div id="login-overlay">
+  <div id="login-modal">
+    <div class="ob-header" style="margin-bottom:22px">
+      <div class="ob-logo">💊</div>
+      <div class="ob-title">Med<span>Sync</span> sign in</div>
+      <div class="ob-sub" id="login-sub">Caregiver dashboard — approved accounts only</div>
+    </div>
+    <div id="login-form">
+      <div class="ob-field"><label>Email</label>
+        <input type="email" id="login-email" autocomplete="username" placeholder="you@example.com"></div>
+      <div class="ob-field"><label>Password</label>
+        <input type="password" id="login-pass" autocomplete="current-password" placeholder="••••••••"
+               onkeydown="if(event.key==='Enter')doLogin()"></div>
+      <div class="ob-err" id="login-err"></div>
+      <button class="btn btn-primary" id="login-btn" onclick="doLogin()">Sign in</button>
+      <button class="login-link" onclick="doResetPassword()">Forgot password?</button>
+    </div>
+    <div id="noaccess" style="display:none">
+      <div class="small" style="line-height:1.6">You are signed in as <b id="na-email"></b>, but this account has not been approved yet.
+        Send this account ID to the dashboard owner so they can add it under <code>access</code> in Firebase:</div>
+      <div class="uid-box" id="na-uid"></div>
+      <button class="btn btn-secondary" style="margin-bottom:8px" onclick="navigator.clipboard && navigator.clipboard.writeText($('na-uid').textContent).then(()=>showToast('Account ID copied','success'))">Copy account ID</button>
+      <button class="btn btn-secondary" onclick="doLogout()">Sign out</button>
+    </div>
+  </div>
+</div>
+
 <div id="onboarding-overlay">
   <div id="onboarding-modal">
     <div class="ob-header">
@@ -891,7 +935,7 @@ input[type=time]::-webkit-calendar-picker-indicator { filter:invert(.7); cursor:
   import { initializeApp }         from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
   import { getDatabase, ref, set, update, push, onValue, remove, runTransaction }
                                    from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
-  import { getAuth, signInAnonymously, onAuthStateChanged }
+  import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail }
                                    from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
   const firebaseConfig = {
@@ -919,18 +963,59 @@ input[type=time]::-webkit-calendar-picker-indicator { filter:invert(.7); cursor:
 
   window.dbOnValue = (r, cb, err) => onValue(r, cb, err || ((e) => {
     console.error('Firebase read error:', e.message);
+    if (/permission/i.test(e.message || '')) { showNoAccess(); return; }
     note.textContent = 'Read error: ' + e.message;
   }));
 
-  note.textContent = 'Signing in…';
-  onAuthStateChanged(auth, (user) => {
-    if (!user) return;
-    note.textContent = 'Signed in — syncing… (uid: ' + user.uid.slice(0, 8) + ')';
+  const $id = (i) => document.getElementById(i);
+  function showLogin(msg) {
+    $id('login-overlay').style.display = 'flex';
+    $id('login-form').style.display = 'block';
+    $id('noaccess').style.display = 'none';
+    $id('login-err').textContent = msg || '';
+    $id('signout-btn').style.display = 'none';
+  }
+  function showNoAccess() {
+    const u = auth.currentUser;
+    if (!u) return showLogin();
+    $id('login-overlay').style.display = 'flex';
+    $id('login-form').style.display = 'none';
+    $id('noaccess').style.display = 'block';
+    $id('na-email').textContent = u.email || '';
+    $id('na-uid').textContent = u.uid;
+  }
+  window.showNoAccess = showNoAccess;
+
+  const AUTH_MSG = {
+    'auth/invalid-credential': 'Wrong email or password.', 'auth/wrong-password': 'Wrong email or password.',
+    'auth/user-not-found': 'Wrong email or password.', 'auth/invalid-email': 'That email address is not valid.',
+    'auth/too-many-requests': 'Too many attempts — wait a few minutes and try again.',
+    'auth/network-request-failed': 'No internet connection.', 'auth/user-disabled': 'This account has been disabled.'
+  };
+  window.doLogin = async () => {
+    const email = $id('login-email').value.trim(), pass = $id('login-pass').value;
+    if (!email || !pass) { $id('login-err').textContent = 'Enter your email and password.'; return; }
+    $id('login-btn').disabled = true; $id('login-btn').textContent = 'Signing in…';
+    try { await signInWithEmailAndPassword(auth, email, pass); $id('login-pass').value = ''; $id('login-err').textContent = ''; }
+    catch (e) { $id('login-err').textContent = AUTH_MSG[e.code] || ('Sign-in failed: ' + e.code); }
+    finally { $id('login-btn').disabled = false; $id('login-btn').textContent = 'Sign in'; }
+  };
+  window.doLogout = async () => { try { await signOut(auth); } finally { location.reload(); } };
+  window.doResetPassword = async () => {
+    const email = $id('login-email').value.trim();
+    if (!email) { $id('login-err').textContent = 'Type your email first, then tap “Forgot password?”.'; return; }
+    try { await sendPasswordResetEmail(auth, email); $id('login-err').textContent = 'Password-reset e-mail sent (check spam too).'; }
+    catch (e) { $id('login-err').textContent = AUTH_MSG[e.code] || ('Could not send reset e-mail: ' + e.code); }
+  };
+
+  note.textContent = 'Checking sign-in…';
+  onAuthStateChanged(auth, async (user) => {
+    if (!user) { note.textContent = 'Please sign in'; showLogin(); return; }
+    if (user.isAnonymous) { await signOut(auth); return; }      // old anonymous session from v3.0
+    $id('login-overlay').style.display = 'none';
+    $id('signout-btn').style.display = 'flex';
+    note.textContent = 'Signed in as ' + (user.email || user.uid.slice(0, 8)) + ' — syncing…';
     if (typeof window.startFirebaseListener === 'function') window.startFirebaseListener();
-  });
-  signInAnonymously(auth).catch((e) => {
-    console.error('Anonymous sign-in failed:', e.code, e.message);
-    note.textContent = 'Sign-in failed: ' + e.code + ' — ' + e.message;
   });
 </script>
 
