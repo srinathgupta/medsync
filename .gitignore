@@ -1,0 +1,6 @@
+   firmware/**/secrets.h
+   .vscode/
+   .DS_Store
+   Thumbs.db
+   *.bak
+   __pycache__/
